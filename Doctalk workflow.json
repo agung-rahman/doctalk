@@ -1,0 +1,772 @@
+{
+  "name": "Doctalk workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.userMessage || '[No message — user just uploaded a document]' }}\n\n{{ $json.content ? 'Document content:\\n\\n' + $json.content : '' }}",
+        "needsFallback": true,
+        "options": {
+          "systemMessage": "=You are a chill but smart document assistant. Think of yourself as a knowledgeable friend who just read the document for you.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nVIBE\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n- Casual but accurate\n- Talk like a person, not a manual\n- Short answers unless the question needs detail\n- Honest when something isn't in the doc\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nWHEN USER UPLOADS A DOCUMENT\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n- Confirm you got it\n- Give a quick 2-3 sentence summary of what it's about\n- For spreadsheets/CSV: mention how many rows, what columns exist, and what the data seems to be tracking\n- Let them know they can start asking questions\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nWHEN USER ASKS QUESTIONS\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n- Answer based on the document only\n- If it's not in the doc, just say \"that's not in the doc\" — don't make stuff up\n- Quote or reference the relevant part if it helps\n- If no doc uploaded yet, just ask them to send one first\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nLANGUAGE\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nALWAYS reply in English by default.\nONLY switch to Indonesian if the user's message explicitly contains Indonesian words.\nIf userMessage is empty or says \"[No message — user just uploaded a document]\", reply in English.\nDocument language is irrelevant — only the user's message determines the language.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nDOCUMENT CONTENT\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n{{ $json.content ?? $json.text ?? 'No document content available.' }}"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1040,
+        48
+      ],
+      "id": "b8ce19a0-eb13-43c9-82e2-cb4dce1c989d",
+      "name": "AI Agent",
+      "retryOnFail": false,
+      "maxTries": 2,
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Code in JavaScript').item.json.chatId }}",
+        "text": "={{ $('AI Agent').item.json.output }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML",
+          "reply_to_message_id": "={{ $('If').item.json.messageId }}"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1520,
+        240
+      ],
+      "id": "0413662c-cccc-466b-92cc-5ba99b1e193d",
+      "name": "Send a text message",
+      "webhookId": "d58740ec-e0f1-4a3c-a905-d9decdd9c45b",
+      "credentials": {
+        "telegramApi": {
+          "id": "ooUjg7FOiY3gXLxI",
+          "name": "Telegram account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Code in JavaScript').item.json.chatId }}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        1152,
+        416
+      ],
+      "id": "425c2e63-06f7-4b3c-b163-b71eeb092474",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "jsCode": "const telegramData = $('HTTP Request').first().json;\nconst updates = telegramData.result;\n\nif (!updates || updates.length === 0) {\n  return [{\n    json: {\n      skip: true, userMessage: '', chatId: '', username: '',\n      messageId: '', hasDocument: false, fileId: '', fileName: '',\n      fileType: '', mimeType: ''\n    }\n  }];\n}\n\nconst latest = updates[0];\nconst msg = latest.message || latest.channel_post;\n\nif (!msg || msg.from?.is_bot) {\n  return [{\n    json: {\n      skip: true, userMessage: '', chatId: '', username: '',\n      messageId: '', hasDocument: false, fileId: '', fileName: '',\n      fileType: '', mimeType: ''\n    }\n  }];\n}\n\n// Skip pesan yang lebih dari 50 detik\nconst msgTime = msg.date * 1000;\nconst now = Date.now();\nif (now - msgTime > 50000) {\n  return [{\n    json: {\n      skip: true, userMessage: '', chatId: '', username: '',\n      messageId: '', hasDocument: false, fileId: '', fileName: '',\n      fileType: '', mimeType: ''\n    }\n  }];\n}\n\nconst chatId = String(msg.chat.id);\nconst username = msg.from?.username || msg.from?.first_name || 'anon';\nconst messageId = String(msg.message_id);\n\n// Deduplication pakai static data\nconst staticData = $getWorkflowStaticData('node');\nconst processedKey = `msg_${messageId}`;\n\nif (staticData[processedKey]) {\n  return [{\n    json: {\n      skip: true, userMessage: '', chatId: '', username: '',\n      messageId: '', hasDocument: false, fileId: '', fileName: '',\n      fileType: '', mimeType: ''\n    }\n  }];\n}\n\n// Simpan messageId dan bersihkan yang sudah expired (10 menit)\nstaticData[processedKey] = Date.now();\nObject.keys(staticData).forEach(key => {\n  if (key.startsWith('msg_') && (Date.now() - staticData[key]) > 600000) {\n    delete staticData[key];\n  }\n});\n\n// Deteksi dokumen (document, photo, audio, video)\nconst doc = msg.document || null;\nconst hasDocument = !!doc;\n\nlet fileId = '';\nlet fileName = '';\nlet fileType = '';\nlet mimeType = '';\n\nif (hasDocument) {\n  fileId = doc.file_id || '';\n  fileName = doc.file_name || 'unknown_file';\n  mimeType = doc.mime_type || '';\n\n  // Deteksi fileType dari extension atau mime_type\n  const extFromName = fileName.split('.').pop().toLowerCase();\n\n  if (mimeType.includes('pdf') || extFromName === 'pdf') {\n    fileType = 'pdf';\n  } else if (\n    mimeType.includes('spreadsheet') ||\n    mimeType.includes('excel') ||\n    ['xlsx', 'xls'].includes(extFromName)\n  ) {\n    fileType = 'xlsx';\n  } else if (\n    mimeType.includes('csv') ||\n    extFromName === 'csv'\n  ) {\n    fileType = 'csv';\n  } else if (\n    mimeType.includes('wordprocessingml') ||\n    mimeType.includes('msword') ||\n    ['doc', 'docx'].includes(extFromName)\n  ) {\n    fileType = 'docx';\n  } else {\n    fileType = extFromName || 'unknown';\n  }\n}\n\nconst userMessage = msg.text || msg.caption || '';\n\nreturn [{\n  json: {\n    skip: false,\n    userMessage,\n    chatId,\n    username,\n    messageId,\n    hasDocument,\n    fileId,\n    fileName,\n    fileType,   // 'pdf' | 'xlsx' | 'csv' | 'docx' | 'unknown'\n    mimeType\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -288,
+        64
+      ],
+      "id": "5debc17f-9c78-4a2d-a13f-c7d99945510e",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "4f88db65-dbb5-44b4-997c-f17c9082535a",
+              "leftValue": "={{ $json.skip }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -112,
+        64
+      ],
+      "id": "e27bb269-f495-40dc-a463-0261aa68a2c7",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -656,
+        64
+      ],
+      "id": "450d35a3-7b91-4c35-8c48-f637837bf18f",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "url": "https://api.telegram.org/bot8718965533:AAGJZg1w6XxrDT_bXAketNs9z3quhI0KkUI/getUpdates?limit=1&offset=-1",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -464,
+        64
+      ],
+      "id": "1fa92a1e-9259-485f-af3c-119442f4bc21",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "anthropic/claude-haiku-4.5",
+          "mode": "list",
+          "cachedResultName": "anthropic/claude-haiku-4.5"
+        },
+        "responsesApiEnabled": false,
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        1056,
+        528
+      ],
+      "id": "a244bdf2-f0cc-4cd7-8db6-d44d03fc952c",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "zmAUM8SaLYTxvRA7",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "e8e25c81-7f4d-490d-b84d-bb0f3e8e0b36",
+              "leftValue": "={{ $json.hasDocument }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        160,
+        192
+      ],
+      "id": "601aa573-9a26-44f4-891b-2768776781eb",
+      "name": "If1"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.telegram.org/bot8718965533:AAGJZg1w6XxrDT_bXAketNs9z3quhI0KkUI/getFile?file_id={{ $('If1').item.json.fileId }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        160,
+        0
+      ],
+      "id": "7f956de9-f3c2-4e84-8027-74114069c30e",
+      "name": "HTTP Request1"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.telegram.org/file/bot8718965533:AAGJZg1w6XxrDT_bXAketNs9z3quhI0KkUI/{{ $json.result.file_path }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        144,
+        -128
+      ],
+      "id": "d8d28805-032d-4102-8aa1-248ec02dd25c",
+      "name": "HTTP Request2"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        944,
+        496
+      ],
+      "id": "9762ab95-4ee6-465e-90e3-5f9fc56e042c",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "Je2WcPwFujiCV6Jy",
+          "name": "Google Gemini(PaLM) Api account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Code in JavaScript').item.json.fileType }}",
+                    "rightValue": "pdf",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "f55407e8-4706-4658-860f-81911906162d"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "387a04ce-a55a-4893-b39c-0948831d252c",
+                    "leftValue": "={{ $('Code in JavaScript').item.json.fileType }}",
+                    "rightValue": "xlsx",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "bbdc11bb-efa9-406b-bff8-8883d5a65d1d",
+                    "leftValue": "={{ $('Code in JavaScript').item.json.fileType }}",
+                    "rightValue": "csv",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "7cfca07e-9d76-4958-bd4f-871bd5bd5bde",
+                    "leftValue": "={{ $('Code in JavaScript').item.json.fileType }}",
+                    "rightValue": "docx",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        384,
+        -144
+      ],
+      "id": "a6c23a68-bd7e-40f0-a4ad-3642bdb65a05",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        384,
+        80
+      ],
+      "id": "4eaeff4e-8865-4e3b-959c-e1d2e4763f53",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "operation": "xlsx",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        384,
+        240
+      ],
+      "id": "6a51d256-7689-40b9-9d45-b02eaba20be3",
+      "name": "Extract from File1"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        384,
+        400
+      ],
+      "id": "b617963b-e919-458b-b46f-0b66c73310f1",
+      "name": "Extract from File2"
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        544,
+        240
+      ],
+      "id": "8c14596a-8abb-4735-af96-ca0ba30a858b",
+      "name": "Aggregate"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.first().json.data;\n\nif (!items || items.length === 0) {\n  return [{ json: { content: 'File Excel kosong atau tidak bisa dibaca.' } }];\n}\n\nconst text = items.map((row, i) => {\n  return `Row ${i + 1}: ` + Object.entries(row)\n    .map(([k, v]) => `${k}: ${v ?? '-'}`)\n    .join(' | ');\n}).join('\\n');\n\nreturn [{ json: { content: text } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        704,
+        192
+      ],
+      "id": "6bbea741-a1e1-44c1-a350-ba4475a983f3",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "operation": "binaryToPropery",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        384,
+        560
+      ],
+      "id": "4051ce36-1e20-4d76-b110-18d5902af6e0",
+      "name": "Extract from File3"
+    },
+    {
+      "parameters": {
+        "jsCode": "const base64 = $input.first().json.data;\nconst buffer = Buffer.from(base64, 'base64');\nconst zlib = require('zlib');\n\nconst zip = buffer;\nlet text = '';\nlet offset = 0;\n\nwhile (offset < zip.length - 4) {\n  if (zip[offset] === 0x50 && zip[offset+1] === 0x4B && \n      zip[offset+2] === 0x03 && zip[offset+3] === 0x04) {\n    \n    const compression = zip.readUInt16LE(offset + 8);\n    const compressedSize = zip.readUInt32LE(offset + 18);\n    const fileNameLength = zip.readUInt16LE(offset + 26);\n    const extraLength = zip.readUInt16LE(offset + 28);\n    const fileName = zip.slice(offset + 30, offset + 30 + fileNameLength).toString('utf-8');\n    const dataOffset = offset + 30 + fileNameLength + extraLength;\n    const compressedData = zip.slice(dataOffset, dataOffset + compressedSize);\n    \n    if (fileName === 'word/document.xml') {\n      let xmlBuffer;\n      if (compression === 0) {\n        xmlBuffer = compressedData;\n      } else if (compression === 8) {\n        xmlBuffer = zlib.inflateRawSync(compressedData);\n      }\n      \n      if (xmlBuffer) {\n        const xml = xmlBuffer.toString('utf-8');\n        const matches = xml.match(/<w:t(?:\\s[^>]*)?>([^<]*)<\\/w:t>/g) || [];\n        text = matches\n          .map(tag => tag.replace(/<[^>]+>/g, '').trim())\n          .filter(Boolean)\n          .join(' ');\n      }\n      break;\n    }\n    \n    offset = dataOffset + compressedSize;\n  } else {\n    offset++;\n  }\n}\n\nif (!text || text.length < 5) {\n  return [{ json: { content: 'Could not read this Word file. Please convert to PDF and try again.' } }];\n}\n\nreturn [{ json: { content: text } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        736,
+        560
+      ],
+      "id": "e6351506-2e5c-4654-bc8a-e2b0d6f9541f",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        544,
+        400
+      ],
+      "id": "cb459ecb-5945-47fa-ba17-ed6fdce0573a",
+      "name": "Aggregate1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.first().json.data;\n\nif (!items || items.length === 0) {\n  return [{ json: { content: 'File CSV kosong atau tidak bisa dibaca.' } }];\n}\n\nconst text = items.map((row, i) => {\n  return `Row ${i + 1}: ` + Object.entries(row)\n    .map(([k, v]) => `${k}: ${v ?? '-'}`)\n    .join(' | ');\n}).join('\\n');\n\nreturn [{ json: { content: text } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        704,
+        352
+      ],
+      "id": "514db46a-15ab-4133-93d1-68fe83a6a747",
+      "name": "Code in JavaScript3"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a text message": {
+      "main": [
+        []
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request2": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract from File1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract from File2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract from File3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File1": {
+      "main": [
+        [
+          {
+            "node": "Aggregate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File2": {
+      "main": [
+        [
+          {
+            "node": "Aggregate1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File3": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript3": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "5142e570-bbed-4ea3-8a7e-7853569b622d",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "f296e483b31f45bb0ace6585e5b319dfe54d8a73887429b52f4bb8fa2b224366"
+  },
+  "id": "eoaMTfmE9pNHHIyp",
+  "tags": []
+}
