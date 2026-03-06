@@ -65,20 +65,30 @@ Code in JavaScript (parse message, detect file type, deduplication)
 
 ## 📸 Screenshots
 
-### Reading an Excel File
-> Bot summarizes a 31-row employee dataset across multiple branches
+### Reading a PDF File
+> Bot summarizes a financial report PDF
 
-![Excel Summary](screenshots/excel-summary.png)
+![PDF Summary](screenshots/pdf-summary.jpg)
+
+### Reading an Excel File
+> Bot summarizes an Excel spreadsheet
+
+![Excel Summary](screenshots/excel-summary.jpg)
+
+### Reading a CSV File
+> Bot reads and summarizes tabular CSV data
+
+![CSV Summary](screenshots/csv-summary.jpg)
 
 ### Reading a Word Document
 > Bot reads and summarizes a DOCX file
 
-![DOCX Summary](screenshots/docx-summary.png)
+![DOCX Summary](screenshots/docx-summary.jpg)
 
 ### n8n Workflow
 > Full automation workflow in n8n editor
 
-![n8n Workflow](screenshots/workflow.png)
+![n8n Workflow](screenshots/workflow.jpg)
 
 ---
 
@@ -124,9 +134,11 @@ Then open `http://localhost:5678` and import the workflow JSON.
 ├── workflow.json        # n8n workflow export
 ├── README.md
 └── screenshots/
-    ├── excel-summary.png
-    ├── docx-summary.png
-    └── workflow.png
+    ├── pdf-summary.jpg
+    ├── excel-summary.jpg
+    ├── csv-summary.jpg
+    ├── docx-summary.jpg
+    └── workflow.jpg
 ```
 
 ---
